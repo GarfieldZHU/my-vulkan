@@ -126,6 +126,7 @@ impl HelloTriangleApplication {
         DebugCallback::new(&instance, msg_severity, msg_type, |msg| {
             println!("validation layer: {:?}", msg.description);
         }).ok()
+
     }
 
     fn main_loop(self) {

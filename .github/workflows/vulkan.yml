@@ -1,4 +1,4 @@
-name: vulkan-project
+name: Vulkan-project
 on:
   push:
     branches: [ master ]

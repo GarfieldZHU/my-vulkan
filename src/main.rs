@@ -16,6 +16,7 @@ use vulkano::instance::{
     Version,
     layers_list,
     debug::{DebugCallback, MessageType, MessageSeverity},
+    PhysicalDevice,
 };
 
 
@@ -31,12 +32,27 @@ const ENABLE_VALIDATION_LAYERS: bool = true;
 #[cfg(not(debug_assertions))]
 const ENABLE_VALIDATION_LAYERS: bool = false;
 
+struct QueueFamilyIndices {
+    graphics_family: i32,
+}
+impl QueueFamilyIndices {
+    fn new() -> Self {
+        Self { graphics_family: -1 }
+    }
+
+    fn is_complete(&self) -> bool {
+        self.graphics_family >= 0
+    }
+}
+
 #[allow(unused)]
 struct HelloTriangleApplication {
     instance: Arc<Instance>,
     debug_callback: Option<DebugCallback>,
     events_loop: EventLoop<()>,
     window: Arc<Window>,
+
+    physical_device_index: usize, // can't store PhysicalDevice directly (lifetime issues)
 }
 
 impl HelloTriangleApplication {
@@ -44,12 +60,14 @@ impl HelloTriangleApplication {
         let (events_loop, window) = Self::init_window();
         let instance = Self::create_instance();
         let debug_callback = Self::setup_debug_callback(&instance);
+        let physical_device_index = Self::pick_physical_device(&instance);
 
         Self {
             instance,
             debug_callback,
             events_loop,
             window,
+            physical_device_index,
         }
     }
 
@@ -127,6 +145,33 @@ impl HelloTriangleApplication {
             println!("validation layer: {:?}", msg.description);
         }).ok()
 
+    }
+
+    fn pick_physical_device(instance: &Arc<Instance>) -> usize {
+        PhysicalDevice::enumerate(&instance)
+            .position(|device| Self::is_device_suitable(&device))
+            .expect("failed to find a suitable GPU!")
+    }
+
+    fn is_device_suitable(device: &PhysicalDevice) -> bool {
+        let indices = Self::find_queue_families(device);
+        indices.is_complete()
+    }
+
+    fn find_queue_families(device: &PhysicalDevice) -> QueueFamilyIndices {
+        let mut indices = QueueFamilyIndices::new();
+        // TODO: replace index with id to simplify?
+        for (i, queue_family) in device.queue_families().enumerate() {
+            if queue_family.supports_graphics() {
+                indices.graphics_family = i as i32;
+            }
+
+            if indices.is_complete() {
+                break;
+            }
+        }
+
+        indices
     }
 
     fn main_loop(self) {

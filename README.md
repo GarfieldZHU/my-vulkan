@@ -1,4 +1,8 @@
 # my-vulkan
+
+[![](https://github.com/GarfieldZHU/my-vulkan/workflows/Vulkan-project/badge.svg)](https://github.com/GarfieldZHU/my-vulkan/actions?query=workflow%3AVulkan-project)
+
+
 Play with Vulkan
 
 ### Dependencies

@@ -2,12 +2,15 @@ extern crate winit;
 extern crate vulkano_win;
 
 use std::sync::Arc;
+use std::collections::HashSet;
+
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{EventLoop, ControlFlow},
     window::{Window, WindowBuilder}, 
     dpi::LogicalSize
 };
+use vulkano_win::VkSurfaceBuild;
 
 use vulkano::instance::{
     Instance,
@@ -19,6 +22,9 @@ use vulkano::instance::{
     PhysicalDevice,
 };
 use vulkano::device::{Device, DeviceExtensions, Queue, Features};
+use vulkano::swapchain::{
+    Surface,
+};
 
 
 const WIDTH: u32 = 800;
@@ -35,14 +41,15 @@ const ENABLE_VALIDATION_LAYERS: bool = false;
 
 struct QueueFamilyIndices {
     graphics_family: i32,
+    present_family: i32,
 }
 impl QueueFamilyIndices {
     fn new() -> Self {
-        Self { graphics_family: -1 }
+        Self { graphics_family: -1, present_family: -1 }
     }
 
     fn is_complete(&self) -> bool {
-        self.graphics_family >= 0
+        self.graphics_family >= 0 && self.present_family >= 0
     }
 }
 
@@ -51,32 +58,37 @@ struct HelloTriangleApplication {
     instance: Arc<Instance>,
     debug_callback: Option<DebugCallback>,
     events_loop: EventLoop<()>,
+    surface: Arc<Surface<Window>>,
     window: Arc<Window>,
 
     physical_device_index: usize, // can't store PhysicalDevice directly (lifetime issues)
     device: Arc<Device>,
 
     graphics_queue: Arc<Queue>,
+    present_queue: Arc<Queue>,
 }
 
 impl HelloTriangleApplication {
     pub fn initialize() -> Self {
-        let (events_loop, window) = Self::init_window();
+        let (_events_loop, window) = Self::init_window();
         let instance = Self::create_instance();
         let debug_callback = Self::setup_debug_callback(&instance);
-        let physical_device_index = Self::pick_physical_device(&instance);
-
-        let (device, graphics_queue) = Self::create_logical_device(
-            &instance, physical_device_index);
+        let (events_loop, surface) = Self::create_surface(&instance);
+        
+        let physical_device_index = Self::pick_physical_device(&instance, &surface);
+        let (device, graphics_queue, present_queue) = Self::create_logical_device(
+            &instance, &surface, physical_device_index);
 
         Self {
             instance,
             debug_callback,
             events_loop,
+            surface,
             window,
             physical_device_index,
             device, 
             graphics_queue,
+            present_queue,
         }
     }
 
@@ -156,18 +168,18 @@ impl HelloTriangleApplication {
 
     }
 
-    fn pick_physical_device(instance: &Arc<Instance>) -> usize {
+    fn pick_physical_device(instance: &Arc<Instance>, surface: &Arc<Surface<Window>>) -> usize {
         PhysicalDevice::enumerate(&instance)
-            .position(|device| Self::is_device_suitable(&device))
+            .position(|device| Self::is_device_suitable(surface, &device))
             .expect("failed to find a suitable GPU!")
     }
 
-    fn is_device_suitable(device: &PhysicalDevice) -> bool {
-        let indices = Self::find_queue_families(device);
+    fn is_device_suitable(surface: &Arc<Surface<Window>>, device: &PhysicalDevice) -> bool {
+        let indices = Self::find_queue_families(surface, device);
         indices.is_complete()
     }
 
-    fn find_queue_families(device: &PhysicalDevice) -> QueueFamilyIndices {
+    fn find_queue_families(surface: &Arc<Surface<Window>>, device: &PhysicalDevice) -> QueueFamilyIndices {
         let mut indices = QueueFamilyIndices::new();
         // TODO: replace index with id to simplify?
         for (i, queue_family) in device.queue_families().enumerate() {
@@ -175,6 +187,9 @@ impl HelloTriangleApplication {
                 indices.graphics_family = i as i32;
             }
 
+            if surface.is_supported(queue_family).unwrap() {
+                indices.present_family = i as i32;
+            }
             if indices.is_complete() {
                 break;
             }
@@ -185,23 +200,39 @@ impl HelloTriangleApplication {
 
     fn create_logical_device(
         instance: &Arc<Instance>,
+        surface: &Arc<Surface<Window>>,
         physical_device_index: usize,
-    ) -> (Arc<Device>, Arc<Queue>) {
+    ) -> (Arc<Device>, Arc<Queue>, Arc<Queue>) {
         let physical_device = PhysicalDevice::from_index(&instance, physical_device_index).unwrap();
-        let indices = Self::find_queue_families(&physical_device);
-
-        let queue_family = physical_device.queue_families()
-            .nth(indices.graphics_family as usize).unwrap();
+        let indices = Self::find_queue_families(&surface, &physical_device);
+        
+        let families = [indices.graphics_family, indices.present_family];
+        use std::iter::FromIterator;
+        let unique_queue_families: HashSet<&i32> = HashSet::from_iter(families.iter());
 
         let queue_priority = 1.0;
+        let queue_families = unique_queue_families.iter().map(|i| {
+            (physical_device.queue_families().nth(**i as usize).unwrap(), queue_priority)
+        });
 
-        let (device, mut queues) = Device::new(physical_device, &Features::none(), &DeviceExtensions::none(),
-            [(queue_family, queue_priority)].iter().cloned())
+        let (device, mut queues) = Device::new(physical_device, &Features::none(),
+            &DeviceExtensions::none(), queue_families)
             .expect("failed to create logical device!");
 
         let graphics_queue = queues.next().unwrap();
+        let present_queue = queues.next().unwrap_or_else(|| graphics_queue.clone());
 
-        (device, graphics_queue)
+        (device, graphics_queue, present_queue)
+    }
+
+    fn create_surface(instance: &Arc<Instance>) -> (EventLoop<()>, Arc<Surface<Window>>) {
+        let events_loop = EventLoop::new();
+        let surface = WindowBuilder::new()
+            .with_title("Vulkan")
+            .with_inner_size(LogicalSize::new(f64::from(WIDTH), f64::from(HEIGHT)))
+            .build_vk_surface(&events_loop, instance.clone())
+            .expect("failed to create window surface!");
+        (events_loop, surface)
     }
 
     fn main_loop(self) {

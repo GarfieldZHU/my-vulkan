@@ -1,6 +1,3 @@
-extern crate winit;
-extern crate vulkano_win;
-
 use std::sync::{
     Arc
 };

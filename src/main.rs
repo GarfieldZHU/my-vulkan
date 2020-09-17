@@ -104,6 +104,8 @@ impl HelloTriangleApplication {
 
         let (swap_chain, swap_chain_images) = Self::create_swap_chain(&instance, &surface, physical_device_index,
             &device, &graphics_queue, &present_queue);
+        
+        Self::create_graphics_pipeline(&device);
 
         Self {
             instance,
@@ -309,6 +311,10 @@ impl HelloTriangleApplication {
         ).expect("failed to create swap chain!");
 
         (swap_chain, images)
+    }
+
+    fn create_graphics_pipeline(_device: &Arc<Device>) {
+
     }
 
     fn find_queue_families(surface: &Arc<Surface<Window>>, device: &PhysicalDevice) -> QueueFamilyIndices {

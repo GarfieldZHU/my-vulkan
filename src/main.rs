@@ -2,7 +2,6 @@ extern crate winit;
 extern crate vulkano_win;
 
 use std::sync::{
-    atomic::AtomicBool,
     Arc
 };
 use std::collections::HashSet;

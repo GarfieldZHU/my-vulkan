@@ -43,7 +43,9 @@ use vulkano::pipeline::{
 
 use vulkano::framebuffer::{
     RenderPassAbstract,
+    Subpass,
 };
+use vulkano::descriptor::PipelineLayoutAbstract;
 
 // Rust 2018 style using macro
 use vulkano::single_pass_renderpass;
@@ -83,6 +85,11 @@ impl QueueFamilyIndices {
     }
 }
 
+type ConcreteGraphicsPipeline = GraphicsPipeline<BufferlessDefinition,
+    Box<dyn PipelineLayoutAbstract + Send + Sync + 'static>,
+    Arc<dyn RenderPassAbstract + Send + Sync + 'static>
+>;
+
 #[allow(unused)]
 struct HelloTriangleApplication {
     instance: Arc<Instance>,
@@ -101,6 +108,10 @@ struct HelloTriangleApplication {
     swap_chain_images: Vec<Arc<SwapchainImage<Window>>>,
 
     render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
+    /* Full type of graphics_pipeline is must,
+     * for BufferlessVertices only works when concrete type is visible to command buffer
+     */
+    graphics_pipeline: Arc<ConcreteGraphicsPipeline>,
 }
 
 impl HelloTriangleApplication {
@@ -118,7 +129,7 @@ impl HelloTriangleApplication {
             &device, &graphics_queue, &present_queue);
 
         let render_pass = Self::create_render_pass(&device, swap_chain.format());
-        Self::create_graphics_pipeline(&device, swap_chain.dimensions());
+        let graphics_pipeline = Self::create_graphics_pipeline(&device, swap_chain.dimensions(), &render_pass);
 
         Self {
             instance,
@@ -133,6 +144,7 @@ impl HelloTriangleApplication {
             swap_chain,
             swap_chain_images,
             render_pass,
+            graphics_pipeline,
         }
     }
 
@@ -347,7 +359,8 @@ impl HelloTriangleApplication {
     fn create_graphics_pipeline(
         device: &Arc<Device>,
         swap_chain_extent: [u32; 2],
-    ) {
+        render_pass: &Arc<dyn RenderPassAbstract + Send + Sync>,
+    ) -> Arc<ConcreteGraphicsPipeline> {
         mod vertex_shader {
             vulkano_shaders::shader! {
                ty: "vertex",
@@ -374,7 +387,7 @@ impl HelloTriangleApplication {
             depth_range: 0.0 .. 1.0,
         };
 
-        let _pipeline_builder = Arc::new(GraphicsPipeline::start()
+        Arc::new(GraphicsPipeline::start()
             .vertex_input(BufferlessDefinition {})
             .vertex_shader(vert_shader_module.main_entry_point(), ())
             .triangle_list()
@@ -389,7 +402,10 @@ impl HelloTriangleApplication {
             .front_face_clockwise()
             // NOTE: no depth_bias here, but on pipeline::raster::Rasterization
             .blend_pass_through() // = default
-        );
+            .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+            .build(device.clone())
+            .unwrap()
+        )
     }
 
     fn find_queue_families(surface: &Arc<Surface<Window>>, device: &PhysicalDevice) -> QueueFamilyIndices {

@@ -444,6 +444,10 @@ impl HelloTriangleApplication {
         self.command_buffers = self.swap_chain_framebuffers.iter()
             .map(|framebuffer| {
                 let vertices = BufferlessVertices { vertices: 3, instances: 1 };
+                // Building command chaining is updated since vulkano 0.19.0.
+                // The `build` method should not be is chain but use a mutable builder.
+                // Refer to issue:   https://github.com/vulkano-rs/vulkano/issues/1421
+                //   and in sample:  https://github.com/vulkano-rs/vulkano-examples/blob/master/src/bin/triangle.rs
                 let mut builder = AutoCommandBufferBuilder::primary_simultaneous_use(self.device.clone(), queue_family).unwrap();
                 builder.begin_render_pass(framebuffer.clone(), false, vec![[0.0, 0.0, 1.0, 1.0].into()])
                     .unwrap()

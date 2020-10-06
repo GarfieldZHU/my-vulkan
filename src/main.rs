@@ -39,6 +39,7 @@ use vulkano::pipeline::{
     GraphicsPipeline,
     vertex::BufferlessDefinition,
     viewport::Viewport,
+    vertex::BufferlessVertices,
 };
 
 use vulkano::framebuffer::{
@@ -48,6 +49,12 @@ use vulkano::framebuffer::{
     Framebuffer,
 };
 use vulkano::descriptor::PipelineLayoutAbstract;
+
+use vulkano::command_buffer::{
+    AutoCommandBuffer,
+    AutoCommandBufferBuilder,
+    DynamicState,
+};
 
 // Rust 2018 style using macro
 use vulkano::single_pass_renderpass;
@@ -115,6 +122,7 @@ struct HelloTriangleApplication {
      */
     graphics_pipeline: Arc<ConcreteGraphicsPipeline>,
     swap_chain_framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
+    command_buffers: Vec<Arc<AutoCommandBuffer>>,
 }
 
 impl HelloTriangleApplication {
@@ -135,7 +143,7 @@ impl HelloTriangleApplication {
         let graphics_pipeline = Self::create_graphics_pipeline(&device, swap_chain.dimensions(), &render_pass);
         let swap_chain_framebuffers = Self::create_framebuffers(&swap_chain_images, &render_pass);
 
-        Self {
+        let mut app = Self {
             instance,
             debug_callback,
             events_loop,
@@ -150,7 +158,11 @@ impl HelloTriangleApplication {
             render_pass,
             graphics_pipeline,
             swap_chain_framebuffers,
-        }
+            command_buffers: vec![],
+        };
+
+        app.create_command_buffers();
+        app
     }
 
     fn init_window() -> (EventLoop<()>,  Arc<Window>) {
@@ -425,6 +437,25 @@ impl HelloTriangleApplication {
                 fba
             }
         ).collect::<Vec<_>>()
+    }
+
+    fn create_command_buffers(&mut self) {
+        let queue_family = self.graphics_queue.family();
+        self.command_buffers = self.swap_chain_framebuffers.iter()
+            .map(|framebuffer| {
+                let vertices = BufferlessVertices { vertices: 3, instances: 1 };
+                let mut builder = AutoCommandBufferBuilder::primary_simultaneous_use(self.device.clone(), queue_family).unwrap();
+                builder.begin_render_pass(framebuffer.clone(), false, vec![[0.0, 0.0, 1.0, 1.0].into()])
+                    .unwrap()
+                    .draw(self.graphics_pipeline.clone(), &DynamicState::none(),
+                        vertices, (), ())
+                    .unwrap()
+                    .end_render_pass()
+                    .unwrap();
+
+                Arc::new(builder.build().unwrap())
+            })
+            .collect();
     }
 
     fn find_queue_families(surface: &Arc<Surface<Window>>, device: &PhysicalDevice) -> QueueFamilyIndices {

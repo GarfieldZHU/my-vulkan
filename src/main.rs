@@ -410,14 +410,14 @@ impl HelloTriangleApplication {
         mod vertex_shader {
             vulkano_shaders::shader! {
                ty: "vertex",
-               path: "src/bin/shader_base.vert"
+               path: "src/bin/shader_vertex_buffer.vert"
             }
         }
 
         mod fragment_shader {
             vulkano_shaders::shader! {
                 ty: "fragment",
-                path: "src/bin/shader_base.frag"
+                path: "src/bin/shader_vertex_buffer.frag"
             }
         }
 

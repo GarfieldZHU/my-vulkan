@@ -31,10 +31,11 @@ use vulkano::swapchain::{
     CompositeAlpha,
     FullscreenExclusive,
     acquire_next_image,
+    AcquireError,
 };
 use vulkano::format::Format;
 use vulkano::image::{ImageUsage, swapchain::SwapchainImage};
-use vulkano::sync::{SharingMode, GpuFuture};
+use vulkano::sync::{self, SharingMode, GpuFuture};
 
 use vulkano::pipeline::{
     GraphicsPipeline,
@@ -124,6 +125,9 @@ struct HelloTriangleApplication {
     graphics_pipeline: Arc<ConcreteGraphicsPipeline>,
     swap_chain_framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
     command_buffers: Vec<Arc<AutoCommandBuffer>>,
+
+    previous_frame_end: Option<Box<dyn GpuFuture>>,
+    recreate_swap_chain: bool,
 }
 
 impl HelloTriangleApplication {
@@ -138,11 +142,13 @@ impl HelloTriangleApplication {
             &instance, &surface, physical_device_index);
 
         let (swap_chain, swap_chain_images) = Self::create_swap_chain(&instance, &surface, physical_device_index,
-            &device, &graphics_queue, &present_queue);
+            &device, &graphics_queue, &present_queue, None);
 
         let render_pass = Self::create_render_pass(&device, swap_chain.format());
         let graphics_pipeline = Self::create_graphics_pipeline(&device, swap_chain.dimensions(), &render_pass);
         let swap_chain_framebuffers = Self::create_framebuffers(&swap_chain_images, &render_pass);
+
+        let previous_frame_end = Some(Self::create_sync_objects(&device));
 
         let mut app = Self {
             instance,
@@ -160,6 +166,8 @@ impl HelloTriangleApplication {
             graphics_pipeline,
             swap_chain_framebuffers,
             command_buffers: vec![],
+            previous_frame_end,
+            recreate_swap_chain: false,
         };
 
         app.create_command_buffers();
@@ -310,6 +318,7 @@ impl HelloTriangleApplication {
         device: &Arc<Device>,
         graphics_queue: &Arc<Queue>,
         present_queue: &Arc<Queue>,
+        old_swapchain: Option<Arc<Swapchain<Window>>>,
     ) -> (Arc<Swapchain<Window>>, Vec<Arc<SwapchainImage<Window>>>) {
         let physical_device = PhysicalDevice::from_index(&instance, physical_device_index).unwrap();
         let capabilities = surface.capabilities(physical_device)
@@ -337,22 +346,41 @@ impl HelloTriangleApplication {
             graphics_queue.into()
         };
 
-        let (swap_chain, images) = Swapchain::new(
-            device.clone(),
-            surface.clone(),
-            image_count,
-            surface_format.0, // TODO: color space?
-            extent,
-            1, // layers
-            image_usage,
-            sharing,
-            capabilities.current_transform,
-            CompositeAlpha::Opaque,
-            present_mode,
-            FullscreenExclusive::Default,
-            true, // clipped
-            surface_format.1, 
-        ).expect("failed to create swap chain!");
+        let (swap_chain, images) = match old_swapchain {
+            Some(swapchain) => Swapchain::with_old_swapchain(
+                device.clone(),
+                surface.clone(),
+                image_count,
+                surface_format.0, // TODO: color space?
+                extent,
+                1, // layers
+                image_usage,
+                sharing,
+                capabilities.current_transform,
+                CompositeAlpha::Opaque,
+                present_mode,
+                FullscreenExclusive::Default,
+                true, // clipped
+                surface_format.1,
+                swapchain,
+            ),
+            None => Swapchain::new(
+                device.clone(),
+                surface.clone(),
+                image_count,
+                surface_format.0, // TODO: color space?
+                extent,
+                1, // layers
+                image_usage,
+                sharing,
+                capabilities.current_transform,
+                CompositeAlpha::Opaque,
+                present_mode,
+                FullscreenExclusive::Default,
+                true, // clipped
+                surface_format.1,
+            ),
+        }.expect("failed to create swap chain!");
 
         (swap_chain, images)
     }
@@ -438,6 +466,10 @@ impl HelloTriangleApplication {
                 fba
             }
         ).collect::<Vec<_>>()
+    }
+
+    fn create_sync_objects(device: &Arc<Device>) -> Box<dyn GpuFuture> {
+        Box::new(sync::now(device.clone())) as Box<dyn GpuFuture>
     }
 
     fn create_command_buffers(&mut self) {
@@ -534,8 +566,21 @@ impl HelloTriangleApplication {
     }
 
     fn draw_frame(&mut self) {
-        let (image_index, _suboptimal, acquire_future) = acquire_next_image(self.swap_chain.clone(), None).unwrap();
+        self.previous_frame_end.as_mut().unwrap().cleanup_finished();
 
+        if self.recreate_swap_chain {
+            self.recreate_swap_chain();
+            self.recreate_swap_chain = false;
+        }
+
+        let (image_index, _suboptimal, acquire_future) = match acquire_next_image(self.swap_chain.clone(), None) {
+            Ok(r) => r,
+            Err(AcquireError::OutOfDate) => {
+                self.recreate_swap_chain = true;
+                return;
+            },
+            Err(err) => panic!("{:?}", err)
+        };
         let command_buffer = self.command_buffers[image_index].clone();
 
         let future = acquire_future
@@ -546,6 +591,19 @@ impl HelloTriangleApplication {
             .unwrap();
 
         future.wait(None).unwrap();
+    }
+
+    fn recreate_swap_chain(&mut self) {
+        let (swap_chain, images) = Self::create_swap_chain(&self.instance, &self.surface, self.physical_device_index,
+            &self.device, &self.graphics_queue, &self.present_queue, Some(self.swap_chain.clone()));
+        self.swap_chain = swap_chain;
+        self.swap_chain_images = images;
+
+        self.render_pass = Self::create_render_pass(&self.device, self.swap_chain.format());
+        self.graphics_pipeline = Self::create_graphics_pipeline(&self.device, self.swap_chain.dimensions(),
+            &self.render_pass);
+        self.swap_chain_framebuffers = Self::create_framebuffers(&self.swap_chain_images, &self.render_pass);
+        self.create_command_buffers();
     }
 }
 

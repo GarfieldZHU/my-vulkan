@@ -30,10 +30,11 @@ use vulkano::swapchain::{
     Swapchain,
     CompositeAlpha,
     FullscreenExclusive,
+    acquire_next_image,
 };
 use vulkano::format::Format;
 use vulkano::image::{ImageUsage, swapchain::SwapchainImage};
-use vulkano::sync::SharingMode;
+use vulkano::sync::{SharingMode, GpuFuture};
 
 use vulkano::pipeline::{
     GraphicsPipeline,
@@ -520,7 +521,8 @@ impl HelloTriangleApplication {
         (events_loop, surface)
     }
 
-    fn main_loop(self) {
+    fn main_loop(mut self) {
+        self.draw_frame();
         self.events_loop.run( move |event, _, control_flow| {
             *control_flow = ControlFlow::Wait;
             println!("{:?}", event);
@@ -529,6 +531,21 @@ impl HelloTriangleApplication {
                 *control_flow = ControlFlow::Exit
             }
         });
+    }
+
+    fn draw_frame(&mut self) {
+        let (image_index, _suboptimal, acquire_future) = acquire_next_image(self.swap_chain.clone(), None).unwrap();
+
+        let command_buffer = self.command_buffers[image_index].clone();
+
+        let future = acquire_future
+            .then_execute(self.graphics_queue.clone(), command_buffer)
+            .unwrap()
+            .then_swapchain_present(self.present_queue.clone(), self.swap_chain.clone(), image_index)
+            .then_signal_fence_and_flush()
+            .unwrap();
+
+        future.wait(None).unwrap();
     }
 }
 
